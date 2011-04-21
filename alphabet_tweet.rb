@@ -18,14 +18,14 @@
 #    twitter password
 #
     
-require('rubygems')
-gem('twitter4r', '0.3.0')
-require('twitter')
-require 'dict'
-require 'time'
+require 'rubygems'
+# gem 'twitter4r', '>= 0.5.3'
+require 'twitter'
+require './lib/dict.rb'
+# require 'time'
 require 'getoptlong'
-require 'rdoc/usage'
-require 'highline/import'
+# require 'rdoc/usage'
+# require 'highline/import'
     
 SERVER = 'www.dict.org'
 DB = 'wn'
@@ -54,7 +54,7 @@ end
 
 if $user == nil
   print('Enter twitter user name: ')
-  $name = gets.chomp
+  $user = gets.chomp
 end
 if $password == nil
   $password = ask("Enter the password for user '#{$user}':" ) { |q| q.echo = false } 
@@ -114,8 +114,3 @@ while 1 do
   match[DB].delete(randomWord);
   
 end
-
-# TODO:
-#   1) Search previous posts, make sure it's not a duplicate
-#   2) When searching through a letters result, keep track of what random word we've checked - DONE
-#   3) Command line arguments; user name/password and whether to confirm status post - DONE

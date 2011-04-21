@@ -1,0 +1,22 @@
+Alphabet Tweet
+==============
+
+Requirements
+-------------
+
+ * Twitter4r >= 0.5.3 (http://twitter4r.rubyforge.org/)
+ * Dict (http://www.davep.org/misc/dict.rb)
+ 
+Usage
+-----
+
+    $ ./alphabet_tweet.rb
+    
+Enter username and password when prompted
+ 
+TODO
+----
+
+ * Search previous posts, make sure it's not a duplicate
+ * When searching through a letters result, keep track of what random word we've checked - DONE
+ * Command line arguments; user name/password and whether to confirm status post - DONE
