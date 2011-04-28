@@ -1,41 +1,37 @@
-#!/usr/bin/ruby
+#!/usr/local/bin/ruby
 
 # == Synopsis
 #
-# alphanbet_tweet: post a word and its definition as a status to twitter
+# alphanbet_tweet: post a word and its definition as a status to twitter account
 #
 # == Usage
 #
-# alphabet_tweet [OPTION] --user [user] --password [password]
+# alphabet_tweet [OPTION] --access-secret [secret] --consumer-secret [secret]
 #
 # -h, --help:
 #    show help
 #
-# --user [name], -u [name]:
-#    twitter user name
+# --access-secret [secret]
+#    access secret
 #
-# --password [password], -p [pasword]:
-#    twitter password
+# --consumer-secret [secret]
+#    consumer secret
 #
     
-require 'rubygems'
-# gem 'twitter4r', '>= 0.5.3'
 require 'twitter'
 require './lib/dict.rb'
-# require 'time'
 require 'getoptlong'
-# require 'rdoc/usage'
-# require 'highline/import'
+require 'rdoc'
     
-SERVER = 'www.dict.org'
+HOSTS = ['www.dict.org']
 DB = 'wn'
 LETTERS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
 
 # get the command line
 opts = GetoptLong.new(
       [ '--help', '-h', GetoptLong::NO_ARGUMENT],
-      [ '--user', '-u', GetoptLong::REQUIRED_ARGUMENT],
-      [ '--password', '-p', GetoptLong::REQUIRED_ARGUMENT],
+      [ '--access-secret', GetoptLong::REQUIRED_ARGUMENT],
+      [ '--consumer-secret', GetoptLong::REQUIRED_ARGUMENT],
       [ '-y', GetoptLong::NO_ARGUMENT]
     )
 
@@ -43,25 +39,26 @@ opts.each do |opt, arg|
       case opt
         when '--help'
           RDoc::usage
-        when '--user'
-          $user = arg
-        when '--password'
-          $password = arg
+        when '--consumer-secret'
+          $consumer_secret = arg
+        when '--access-secret'
+          $access_secret = arg
         when '-y'
           $no_prompt = true
     end
 end
 
-if $user == nil
-  print('Enter twitter user name: ')
-  $user = gets.chomp
+if $consumer_secret == nil
+  print('Enter the consumer secret: ')
+  $consumer_secret = gets.chomp
 end
-if $password == nil
-  $password = ask("Enter the password for user '#{$user}':" ) { |q| q.echo = false } 
+if $access_secret == nil
+  print('Enter the access secret: ')
+  $access_secret = gets.chomp
 end
 
 # create twitter client
-client = Twitter::Client.new(:login => $user, :password => $password)
+client = Twitter::Client.new(:oauth_consumer => {:key =>'10FX27sEXQpUvWNgZsvA', :secret => $consumer_secret}, :oauth_access => {:key => '20802564-BWLtD72Ah4DZpS0fPIIDdiIebvQ7oiYFZPbxofCFy', :secret => $access_secret})
 
 # get the previous post's letter
 timeline = client.timeline_for(:me, {:count => 1})
@@ -79,7 +76,7 @@ else
 end
 
 # create a new dict object
-dict = DICT.new(SERVER)
+dict = DICT.new(HOSTS)
 dict.client("%s v%s")
 match = dict.match(DB, 're', '^' + letter + '\w*$')
 

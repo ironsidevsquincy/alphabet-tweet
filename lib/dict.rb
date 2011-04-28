@@ -1,581 +1,441 @@
-#!/usr/bin/env ruby
-### dict.rb --- RFC 2229 client for ruby.
-## Copyright 2002,2003 by Dave Pearson <davep@davep.org>
-## $Revision: 1.9 $
-##
-## dict.rb is free software distributed under the terms of the GNU General
-## Public Licence, version 2. For details see the file COPYING.
+# dict.rb - a client-side implementation of the DICT protocol (RFC 2229)
+#
+# $Id: dict.rb,v 1.29 2007/05/20 00:01:36 ianmacd Exp $
+# 
+# Version : 0.9.4
+# Author  : Ian Macdonald <ian@caliban.org>
+#
+# Copyright (C) 2002-2007 Ian Macdonald
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2, or (at your option)
+#   any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software Foundation,
+#   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
-### Commentary:
-##
-## The following code provides a set of RFC 2229 client classes for ruby.
-## See <URL:http://www.dict.org/> for more details about dictd.
+=begin
 
-### TODO:
-##
-## o Add support for AUTH.
+= NAME
+Ruby/DICT - client-side DICT protocol library
+= SYNOPSIS
 
-# We need sockets.
-require "socket"
+  require 'dict'
 
-############################################################################
-# Dictionary error class.
-class DictError < RuntimeError
-end
+  dict = DICT.new('dict.org', DICT::DEFAULT_PORT)
+  dict.client('a Ruby/DICT client')
+  definitions = dict.define(DICT::ALL_DATABASES, 'ruby')
 
-############################################################################
-# Dict utility code.
-module Dict
-
-  # Default host.
-  DEFAULT_HOST = "localhost"
-  
-  # Default port.
-  DEFAULT_PORT = 2628
-
-  # End of line marker.
-  EOL = "\r\n"
-
-  # End of data marker
-  EOD = "." + EOL
-
-  # The special database names.
-  DB_FIRST = "!"
-  DB_ALL   = "*"
-
-  # The guaranteed match strategies.
-  MATCH_DEFAULT = "."
-  MATCH_EXACT   = "exact"
-  MATCH_PREFIX  = "prefix"
-  
-  # The various response numbers.
-  RESPONSE_DATABASES_FOLLOW    = 110
-  RESPONSE_STRATEGIES_FOLLOW   = 111
-  RESPONSE_INFO_FOLLOWS        = 112
-  RESPONSE_HELP_FOLLOWS        = 113
-  RESPONSE_SERVER_INFO_FOLLOWS = 114
-  RESPONSE_DEFINITIONS_FOLLOW  = 150
-  RESPONSE_DEFINITION_FOLLOWS  = 151
-  RESPONSE_MATCHES_FOLLOW      = 152
-  RESPONSE_CONNECTED           = 220
-  RESPONSE_OK                  = 250
-  RESPONSE_NO_MATCH            = 552
-  RESPONSE_NO_DATABASES        = 554
-  RESPONSE_NO_STRATEGIES       = 555
-  
-  # Get the reply code of the passed text.
-  def replyCode( text, default = nil )
-
-    if text =~ /^\d{3} /
-      text.to_i
-    elsif default
-      default
-    else
-      raise DictError.new(), "Invalid reply from host \"#{text}\"."
-    end
-    
-  end
-
-  # replyCode should be private.
-  private :replyCode
-  
-end
-
-############################################################################
-# Dict base class.
-class DictBase
-  # Mixin the Dict utility code.
-  include Dict
-end
-
-############################################################################
-# Dictionary definition class.
-class DictDefinition < Array
-
-  # Mixin the Dict utility code.
-  include Dict
-  
-  # Constructor
-  def initialize( details, conn )
-
-    # Call to the super.
-    super()
-
-    # Split the details out.
-    details     = /^\d{3} "(.*?)"\s+(\S+)\s+"(.*)"/.match( details )
-    @word       = details[ 1 ]
-    @database   = details[ 2 ]
-    @name       = details[ 3 ]
-
-    # Read in the definition.
-    while ( reply = conn.readline() ) != EOD
-      push( reply.chop() )
-    end
-
-  end
-  
-  # Access to the word
-  def word
-    @word
-  end
-
-  # Access to the database
-  def database
-    @database
-  end
-
-  # Access to the database name
-  def name
-    @name
-  end
-
-  # Return an array of words you should also see in regard to this definition.
-  def seeAlso
-    join( " " ).scan( /\{(.*?)\}/ )
-  end
-
-end
-
-############################################################################
-# Dictionary definition list class.
-class DictDefinitionList < Array
-
-  # Mixin the Dict utility code.
-  include Dict
-  
-  # Constructor
-  def initialize( conn )
-
-    # Call to the super.
-    super()
-
-    # While there's a definition to be had...
-    while replyCode( reply = conn.readline() ) == RESPONSE_DEFINITION_FOLLOWS
-      # ...add it to the list.
-      push( DictDefinition.new( reply, conn ) )
-    end
-
-  end
-  
-end
-
-############################################################################
-# Base dictionary array class.
-class DictArray < Array
-
-  # Mixin the Dict utility code.
-  include Dict
-
-  # Constructor
-  def initialize( conn )
-
-    # Call to the super.
-    super()
-
-    # While there's a match to be had...
-    while replyCode( reply = conn.readline(), 0 ) != RESPONSE_OK
-      # ...add it to the list.
-      push( reply ) if reply != EOD
-    end
-
-  end
-  
-end
-
-############################################################################
-# Class for holding a dictionary item in a dictionary array.
-class DictArrayItem
-
-  # Constructor.
-  def initialize( text )
-    match        = /^(\S+)\s+"(.*)"/.match( text )
-    @name        = match[ 1 ]
-    @description = match[ 2 ]
-  end
-
-  # Access to the name.
-  def name
-    @name
-  end
-
-  # Access to the description.
-  def description
-    @description
-  end
-  
-end
-
-############################################################################
-# Dictionary item array class.
-class DictItemArray < DictArray
-
-  # Push the text as a DictArrayItem.
-  def push( text )
-    super( DictArrayItem.new( text ) )
-  end
-
-end
-
-############################################################################
-# Dict client class.
-class DictClient < DictBase
-
-  # Constructor.
-  def initialize( host = DEFAULT_HOST, port = DEFAULT_PORT )
-    @host   = host
-    @port   = port
-    @conn   = nil
-    @banner = nil
-  end
-
-  # Read-only access to the host.
-  def host
-    @host
-  end
-
-  # Read-only access to the port.
-  def port
-    @port
-  end
-
-  # Are we connected?
-  def connected?
-    @conn != nil
-  end
-
-  # Check if there's a connected, throw an error if there isn't one.
-  def checkConnection
-    unless connected?
-      raise DictError.new(), "Not connected."
+  if definitions
+    definitions.each do |d|
+      printf("From %s [%s]:\n\n", d.description, d.database)
+      d.definition.each { |line| print line }
     end
   end
 
-  # checkConnection should be private.
-  private :checkConnection
-  
-  # Send text to the server
-  def send( text )
-    checkConnection()
-    @conn.write( text + EOL )
+  dict.disconnect
+
+= DESCRIPTION
+Ruby/DICT is a client-side library implementation of the DICT protocol,
+as described in ((<RFC 2229|URL:ftp://ftp.isi.edu/in-notes/rfc2229.txt>)).
+= CLASS METHODS
+--- DICT.new(hosts, port = DICT::DEFAULT_PORT, debug = false, verbose = false)
+    This creates a new instance of the DICT class. A DICT object has four
+    instance variables: ((|capabilities|)), ((|code|)), ((|message|)) and
+    ((|msgid|)). ((|capabilities|)) is an array of Strings relating to
+    capabilities implemented on the server, ((|code|)) is the last status
+    code returned by the server, ((|message|)) is the text of the message
+    related to ((|code|)), and ((|msgid|)) is the message ID returned by the
+    server.
+= INSTANCE METHODS
+--- DICT#disconnect
+    Disconnect from the server.
+--- DICT#define(database, word)
+    Obtain definitions for ((|word|)) from ((|database|)). A list of valid
+    databases can be obtained using DICT#show(DICT::DATABASES).
+
+    To show just the first definition found, use ((|DICT::FIRST_DATABASE|))
+    as the database name. To show definitions from all databases, use
+    ((|DICT::ALL_DATABASES|)).
+
+    On success, this returns an array of Struct:Definition objects.
+    ((*nil*)) is returned on failure.
+--- DICT#match(database, strategy, word)
+    Obtain matches for ((|word|)) from ((|database|)) using ((|strategy|)).
+
+    On success, a hash of arrays is returned. The keys of the hash are the
+    database names and the values are arrays of word matches that were found
+    in that database. ((*nil*)) is returned on failure.
+--- DICT#show_server
+    This method retrieves information on the server itself.
+
+    A String is returned on success, while ((*nil*)) is returned on failure.
+--- DICT#show_db
+    This method retrieves information on the databases offered by the server.
+
+    A Hash indexed on database name and containing database descriptions
+    is returned on success, while ((*nil*)) is returned on failure.
+--- DICT#show_info(database)
+    This method retrieves information on a particular database offered by
+    the server.
+
+    A String is returned on success, while ((*nil*)) is returned on failure.
+--- DICT#show_strat
+    This method retrieves information on the strategies offered by the server.
+
+    A Hash indexed on strategy name and containing strategy descriptions
+    is returned on success, while ((*nil*)) is returned on failure.
+--- DICT#status
+    This method returns a single line String of status information from the
+    server.
+--- DICT#help
+    This method returns a String of help information from the server,
+    describing the commands it implements.
+--- DICT#client
+    This method sends a single line String of information describing a client
+    application to the server.
+--- DICT#auth(user, secret)
+    This method attempts to authenticate ((|user|)) to the server using
+    ((|secret|)). Note that ((|secret|)) is not literally passed to the server.
+= CONSTANTS
+Ruby/DICT uses a lot of constants, mostly for the status codes
+returned by DICT servers. See the source for details.
+
+Some of the more interesting other constants:
+: DICT::FIRST_DATABASE
+  Define or match, stopping at first database where match is found
+: DICT::ALL_DATABASES
+  Define or match, gathering matches from all databases
+: DICT::DEFAULT_MATCH_STRATEGY
+  Match using a server-dependent default strategy, which should be the best
+  strategy available for interactive spell checking
+: DICT::DEFAULT_PORT
+  The default port used by DICT servers, namely 2628
+: DICT::ERROR
+  A Regex constant matching any server status code indicating an error
+= EXCEPTIONS
+Exception classes are subclasses of the container class DICTError, which is,
+itself, a subclass of RuntimeError
+--- ConnectError.new(message, code = 2)
+    A ConnectError is raised if DICT::new is unable to connect to the chosen
+    DICT server for any reason. Program execution will terminate.
+--- ProtocolError.new(message, code = 3)
+    A ProtocolError exception can be used if a server operation returns a
+    status code matching DICT::ERROR. This does not happen automatically. The
+    code is stored in the ((|code|)) attribute of the instance of the DICT
+    object. Program execution will terminate.
+= AUTHOR
+Written by Ian Macdonald <ian@caliban.org>
+= COPYRIGHT
+ Copyright (C) 2002-2007 Ian Macdonald
+
+ This is free software; see the source for copying conditions.
+ There is NO warranty; not even for MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.
+= SEE ALSO
+* ((<"Ruby/DICT home page - http://www.caliban.org/ruby/"|URL:http://www.caliban.org/ruby/>))
+* ((<"The DICT development group - http://www.dict.org/"|URL:http://www.dict.org/>))
+* ((<"RFC 2229 - ftp://ftp.isi.edu/in-notes/rfc2229.txt"|URL:ftp://ftp.isi.edu/in-notes/rfc2229.txt>))
+= BUGS
+Send all bug reports, enhancement requests and patches to the
+author.
+= HISTORY
+$Id: dict.rb,v 1.29 2007/05/20 00:01:36 ianmacd Exp $
+
+=end
+
+
+require 'socket'
+require 'digest/md5'
+
+
+# lines that start with .. need to be reduced to .
+#
+class String
+  def undot!
+    sub!(/^\.\./, '.')
   end
+end
 
-  # send should be private.
-  private :send
-  
-  # Connect to the host.
-  def connect
 
-    # Are we already connected?
-    if connected?
-      # Yes, throw an error.
-      raise DictError.new(), "Attempt to connect a conencted client."
-    else
+# a basic exception class for DICT errors
+#
+class DICTError < RuntimeError
+  def initialize(message, code = 1)
+    $stderr.puts message
+    exit code
+  end
+end
 
-      # Nope, open a connection
-      @conn = TCPsocket.open( host, port )
-      
-      # Get the banner.
-      @banner = @conn.readline()
 
-      # Valid return value?
-      unless replyCode( @banner ) == RESPONSE_CONNECTED
-        raise DictError.new(), "Connection refused \"#{@banner}\"."
+# deal with connection errors
+#
+class ConnectError < DICTError
+  def initialize(message, code = 2)
+    super
+  end
+end
+
+
+# deal with status code errors
+#
+class ProtocolError < DICTError
+  def initialize(message, code = 3)
+    super
+  end
+end
+
+# a structure for definitions
+#
+Definition = Struct.new('Definition', :word, :definition, :database,
+			:description)
+
+class DICT
+  attr_reader :capabilities, :code, :message, :msgid
+
+  DATABASES_PRESENT		= '110'
+  STRATEGIES_AVAILABLE		= '111'
+  DATABASE_INFORMATION		= '112'
+  HELP_TEXT			= '113'
+  SERVER_INFORMATION		= '114'
+  CHALLENGE_FOLLOWS		= '130'
+  DEFINITIONS_RETRIEVED		= '150'
+  WORD_DEFINITION		= '151'
+  MATCHES_PRESENT		= '152'
+  STATUS_RESPONSE		= '210'
+  CONNECTION_ESTABLISHED	= '220'
+  CLOSING_CONNECTION		= '221'
+  AUTHENTICATION_SUCCESSFUL	= '230'
+  OK				= '250'
+  SEND_RESPONSE			= '330'
+  TEMPORARILY_UNAVAILABLE	= '420'
+  SHUTTING_DOWN			= '421'
+  UNRECOGNISED_COMMAND		= '500'
+  ILLEGAL_PARAMETERS		= '501'
+  COMMAND_NOT_IMPLEMENTED	= '502'
+  PARAMETER_NOT_IMPLEMENTED	= '503'
+  ACCESS_DENIED			= '530'
+  AUTH_DENIED			= '531'
+  UNKNOWN_MECHANISM		= '532'
+  INVALID_DATABASE		= '550'
+  INVALID_STRATEGY		= '551'
+  NO_MATCH 			= '552'
+  NO_DATABASES_PRESENT		= '554'
+  NO_STRATEGIES_AVAILABLE	= '555'
+
+  ALL_DATABASES			= '*'
+  DEFAULT_MATCH_STRATEGY	= '.'
+  DEFAULT_PORT			= 2628
+  ERROR				= /^[45]/
+  FIRST_DATABASE		= '!'
+  MAX_LINE_LENGTH 		= 1024
+  PAIR				= /^(\S+)\s"(.+)"\r$/
+  REPLY_CODE			= /^\d\d\d/
+
+  def initialize(hosts, port = DEFAULT_PORT, debug = false, verbose = false)
+    hosts.each do |host|
+      @debug = debug
+      @verbose = verbose
+      printf("Attempting to connect to %s:%d...\n", host, port) if @verbose
+
+      begin
+	@sock = TCPSocket.open(host, port)
+      rescue
+	next	# cycle through list of servers, if more than one
       end
 
-      # Now we announce ourselves to the server.
-      send( "client org.davep.dict.rb $Revision: 1.9 $ <URL:http://www.davep.org/misc/dict.rb>" )
-      unless replyCode( reply = @conn.readline() ) == RESPONSE_OK
-        raise DictError.new(), "Client announcement failed \"#{reply}\""
-      end
-      
-      # If we were passed a block, yield to it
-      yield self if block_given?
-      
+      break	# continue if connection to this host succeeded
     end
 
+    # catch failure
+    raise ConnectError, 'Unable to connect to host' unless defined? @sock
+
+    # check status line on connect
+    line = get_line
+    raise ConnectError, line if line =~ ERROR
+
+    caps, @msgid = /(?:<(.+?)>\s)?(<.*>)/.match(line)[1..2]
+    @capabilities = caps ? caps.split(/\./) : []
+    if @verbose
+      printf("Capabilities: %s\n", @capabilities.join(', '))
+      printf("Msgid: %s\n", @msgid)
+    end
   end
 
-  # Disconnect.
+  private
+
+  # output a line to the server
+  #
+  def send_line(command)
+    line = command + "\r\n"
+    $stderr.printf("SEND: %s", line) if @debug
+    @sock.print(line)
+  end
+
+  # get a line of input from the server
+  #
+  def get_line
+    line = @sock.readline("\r\n")
+    $stderr.printf("RECV: %s", line) if @debug
+    line
+  end
+
+  # send a command and get a response
+  #
+  def exec_cmd(command)
+    send_line(command)
+    line = get_line
+    @code, @message = /^(\d\d\d)\s(.*)$/.match(line)[1..2]
+    # remember the command just executed
+    @command = command
+  end
+
+  # determine whether we're at the end of this response
+  #
+  def end_of_text?(line)
+    line =~ /^\.\r$/ ? true : false
+  end
+
+  # generic method to issue command and parse response
+  #
+  def parse_response
+    return nil if @code =~ ERROR
+
+    while line = get_line
+      # on first pass through loop, create list as either a hash
+      # or a string, depending # on what data looks like
+      list ||= line =~ PAIR ? Hash.new : ''
+
+      # check for end of data
+      return list if line =~ REPLY_CODE
+
+      if ! end_of_text? line
+	line.undot!
+	(list << line; next) if list.is_a?(String)  # list is just text
+
+	# list is a hash of data pairings
+	name, desc = PAIR.match(line)[1..2]
+	if @command =~ /^MATCH/
+	  list[name] = Array.new unless list[name]
+	  list[name] << desc
+	else
+	  list[name] = desc
+	end
+
+      end
+    end
+  end
+
+  public
+
+  # QUIT from the server
+  #
   def disconnect
-
-    # Are we connected?
-    if connected?
-      # Yes, close the connection
-      send( "quit" )
-      @conn.close()
-      @conn   = nil
-      @banner = nil
-    else
-      # No, throw an error.
-      raise DictError.new(), "Attempt to disconnect a disconnected client."
-    end
-
+    exec_cmd('QUIT')
+    @sock.close
   end
 
-  # Return the banner we were handed.
-  def banner
-    checkConnection()
-    @banner
-  end
+  # DEFINE a word
+  #
+  def define(db, word)
+    definitions = Array.new
+    d = Definition.new
+    d.word = word
+    d.definition = Array.new
 
-  # Core code for array oriented command.
-  def arrayCommand( command, array_class, good, bad = nil )
+    exec_cmd('DEFINE %s "%s"' % [ db, word ])
 
-    # Send the command
-    send( command )
+    return nil if @code =~ ERROR
 
-    # Worked?
-    if replyCode( reply = @conn.readline() ) == good
-      # Yes, load up the array
-      array_class.new( @conn )
-    elsif bad and replyCode( reply ) == bad
-      # "Bad" response, return an empty array
-      Array.new()
-    else
-      # Something else, throw an error.
-      raise DictError.new(), reply
-    end
-    
-  end
+    in_text = false
+    while line = get_line
+      return definitions if line =~ /^#{OK}/
 
-  # arrayCommand is private.
-  private :arrayCommand
-  
-  # Define a word.
-  def define( word, database = DB_ALL )
-    arrayCommand( "define #{database} \"#{word}\"", DictDefinitionList, RESPONSE_DEFINITIONS_FOLLOW, RESPONSE_NO_MATCH )
-  end
-
-  # Match a word.
-  def match( word, strategy = MATCH_DEFAULT, database = DB_ALL )
-    arrayCommand( "match #{database} #{strategy} \"#{word}\"", DictItemArray, RESPONSE_MATCHES_FOLLOW, RESPONSE_NO_MATCH )
-  end
-
-  # Get a list of available databases.
-  def databases
-    arrayCommand( "show db", DictItemArray, RESPONSE_DATABASES_FOLLOW, RESPONSE_NO_DATABASES )
-  end
-
-  # Get a list of available strategies.
-  def strategies
-    arrayCommand( "show strat", DictItemArray, RESPONSE_STRATEGIES_FOLLOW, RESPONSE_NO_STRATEGIES )
-  end
-
-  # Get the information for a given database.
-  def info( database )
-    arrayCommand( "show info \"#{database}\"", DictArray, RESPONSE_INFO_FOLLOWS )
-  end
-
-  # Get information about the server.
-  def server
-    arrayCommand( "show server", DictArray, RESPONSE_SERVER_INFO_FOLLOWS )
-  end
-
-  # Get help from the server.
-  def help
-    arrayCommand( "help", DictArray, RESPONSE_HELP_FOLLOWS )
-  end
-  
-end
-
-############################################################################
-# Provide a dict command.
-if $0 == __FILE__
-
-  # We're going to use long options.
-  require "getoptlong"
-
-  # Command result
-  result = 1
-  
-  # Setup the default parameters.
-  $params = {
-    :host       => ENV[ "DICT_HOST" ]  || Dict::DEFAULT_HOST,
-    :port       => ENV[ "DICT_PORT" ]  || Dict::DEFAULT_PORT,
-    :database   => ENV[ "DICT_DB" ]    || Dict::DB_ALL,
-    :strategy   => ENV[ "DICT_STRAT" ] || Dict::MATCH_DEFAULT,
-    :match      => false,
-    :dbs        => false,
-    :strats     => false,
-    :serverhelp => false,
-    :info       => nil,
-    :serverinfo => false,
-    :help       => false,
-    :licence    => false
-  }
-
-  # Print the help screen.
-  def printHelp
-    print "dict.rb v#{/(\d+\.\d+)/.match( '$Revision: 1.9 $' )[ 1 ]}
-Copyright 2002,2003 by Dave Pearson <davep@davep.org>
-http://www.davep.org/
-
-Supported command line options:
-
-  -h --host <host>         Specify the host to be contacted
-                           (default is \"#{Dict::DEFAULT_HOST}\").
-  -p --port <port>         Specity the port to be connected
-                           (default is #{Dict::DEFAULT_PORT}).
-  -d --database <db>       Specity the database to be searched
-                           (default is \"#{Dict::DB_ALL}\").
-  -m --match               Perform a match instead of a define.
-  -s --strategy <strat>    Specity the strategy to use for the match/define
-                           (default is \"#{Dict::MATCH_DEFAULT}\").
-  -D --dbs                 List databases available on the server.
-  -S --strats              List stratagies available on the server.
-  -H --serverhelp          Display the server's help.
-  -i --info <db>           Display information about a database.
-  -I --serverinfo          Display information about the server.
-     --help                Display this help.
-  -L --licence             Display the licence for this program.
-
-Supported environment variables:
-
-  DICT_HOST                Specify the host to be contacted.
-  DICT_PORT                Specify the port to be connected.
-  DICT_DB                  Specify the database to be searched.
-  DICT_STRAT               Specify the strategy to use for the match/define.
-
-"
-  end
-
-  # Print the licence.
-  def printLicence
-   print "dict.rb - RFC 2229 client for ruby.
-Copyright (C) 2002,2003 Dave Pearson <davep@davep.org>
-
-This program is free software; you can redistribute it and/or modify it
-under the terms of the GNU General Public License as published by the Free
-Software Foundation; either version 2 of the License, or (at your option)
-any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-more details.
-
-You should have received a copy of the GNU General Public License along with
-this program; if not, write to the Free Software Foundation, Inc., 675 Mass
-Ave, Cambridge, MA 02139, USA.
-
-"
-  end
-
-  # Get the arguments from the command line.
-  begin
-    GetoptLong.new().set_options(
-                                 [ "--host",       "-h", GetoptLong::REQUIRED_ARGUMENT ],
-                                 [ "--port",       "-p", GetoptLong::REQUIRED_ARGUMENT ],
-                                 [ "--database",   "-d", GetoptLong::REQUIRED_ARGUMENT ],
-                                 [ "--match",      "-m", GetoptLong::NO_ARGUMENT       ],
-                                 [ "--strategy",   "-s", GetoptLong::REQUIRED_ARGUMENT ],
-                                 [ "--dbs",        "-D", GetoptLong::NO_ARGUMENT       ],
-                                 [ "--strats",     "-S", GetoptLong::NO_ARGUMENT       ],
-                                 [ "--serverhelp", "-H", GetoptLong::NO_ARGUMENT       ],
-                                 [ "--info",       "-i", GetoptLong::REQUIRED_ARGUMENT ],
-                                 [ "--serverinfo", "-I", GetoptLong::NO_ARGUMENT       ],
-                                 [ "--help",             GetoptLong::NO_ARGUMENT       ],
-                                 [ "--licence",    "-L", GetoptLong::NO_ARGUMENT       ]
-                                 ).each {|name, value| $params[ name.gsub( /^--/, "" ).intern ] = value }
-  rescue GetoptLong::Error
-    printHelp()
-    exit 1
-  end
-
-  # Method for printing titles.
-  def title( text, char )
-    print( ( char * 76 ) + "\n#{text}\n" + ( char * 76 ) + "\n"  )
-  end
-
-  # Method for printing a list.
-  def printList( name, list )
-    title( "#{name} available on #{$params[ :host ]}:#{$params[ :port ]}", "=" )
-    list.each {|item| print item.class == DictArrayItem ? "#{item.name} - #{item.description}\n" : item }
-    print "\n"
-  end
-
-  # The need for help overrides everything else
-  if $params[ :help ]
-    printHelp()
-    result = 0
-  elsif $params[ :licence ]
-    # As does the need for the legal mumbojumbo
-    printLicence()
-    result = 0
-  else
-
-    begin
-
-      # With a dict client...
-      DictClient.new( $params[ :host ], $params[ :port ] ).connect() do |dc|
-        
-        # User wants to see a list of databases?
-        printList( "Databases", dc.databases ) if $params[ :dbs ]
-        
-        # User wants to see a list of strategies?
-        printList( "Strategies", dc.strategies ) if $params[ :strats ]
-        
-        # User wants to see the server help?
-        printList( "Server help", dc.help ) if $params[ :serverhelp ]
-        
-        # User wants to see help on a database?
-        printList( "Info for #{$params[ :info ]}", dc.info( $params[ :info ] ) ) if $params[ :info ]
-        
-        # User wants to see server information?
-        printList( "Server information", dc.server ) if $params[ :serverinfo ]
-        
-        # Look up any words left on the command line.
-        ARGV.each do |word|
-          
-          title( "Word: #{word}", "=" )
-          
-          # Did the user require a match?
-          if $params[ :match ]
-            
-            # Yes, display matches.
-            if ( matches = dc.match( word, $params[ :strategy ], $params[ :database ] ) ).empty?
-              print "No matches found\n"
-            else
-              matches.each {|wm| print "Database: \"#{wm.name}\" Match: \"#{wm.description}\"\n" }
-            end
-            
-          else
-            
-            # No, display definitions.
-            if ( defs = dc.define( word, $params[ :database ] ) ).empty?
-              print "No definitions found\n"
-            else
-              defs.each do |wd|
-                title( "From: #{wd.database} - #{wd.name}", "-" )
-                wd.each {|line| print line + "\n" }
-              end
-            end
-            
-          end
-          
-        end
-        
-        # Disconnect.
-        dc.disconnect()
-      
+      if ! in_text && line =~ /^#{WORD_DEFINITION}/
+	word, d.database, d.description =
+	  /^\d\d\d\s"(.+?)"\s(\S+)\s"(.+)"\r$/.match(line)[1..3]
+	in_text = true
+      elsif end_of_text? line	# finish definition and start a new one
+	definitions << d
+	d = Definition.new
+	d.word = word
+	d.definition = Array.new
+	in_text = false
+      else
+	line.undot!
+	d.definition << line
       end
 
-      # If we made it this far everything should have worked.
-      result = 0
-      
-    rescue SocketError => e
-      print "Error connecting to server: #{e}\n"
-    rescue DictError => e
-      print "Server error: #{e}\n"
-    rescue /WIN/i.match( RUBY_PLATFORM ) ? Errno::E10061 : Errno::ECONNREFUSED => e
-      print "Error connecting to server: #{e}\n"
     end
-
   end
 
-  # Return the result to the caller.
-  exit result
-  
-end
+  # MATCH a word
+  #
+  def match(db, strategy, word)
+    exec_cmd('MATCH %s %s "%s"' % [ db, strategy, word ])
+    parse_response
+  end
 
-### dict.rb ends here
+  # get database list
+  #
+  def show_db
+    exec_cmd("SHOW DB")
+    parse_response
+  end
+
+  # get strategy list
+  #
+  def show_strat
+    exec_cmd("SHOW STRAT")
+    parse_response
+  end
+
+  # get information on database
+  #
+  def show_info(db)
+    exec_cmd('SHOW INFO %s' % db)
+    parse_response
+  end
+
+  # get server information
+  #
+  def show_server
+    exec_cmd("SHOW SERVER")
+    parse_response
+  end
+  
+  # request server STATUS information
+  #
+  def status
+    exec_cmd('STATUS')
+    @message
+  end
+
+  # request server-side HELP
+  #
+  def help
+    exec_cmd('HELP')
+    parse_response
+  end
+
+  # send CLIENT information
+  #
+  def client(info)
+    exec_cmd('CLIENT %s' % info)
+  end
+
+  # AUTHorise user
+  #
+  def auth(user, secret)
+    auth = MD5::new(@msgid + secret).hexdigest
+    exec_cmd('AUTH %s %s' % [ user, auth ])
+  end
+
+end
