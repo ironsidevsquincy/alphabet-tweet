@@ -19,7 +19,7 @@
 #
     
 require 'twitter'
-require './lib/dict.rb'
+require 'dict'
 require 'getoptlong'
 require 'rdoc'
     
